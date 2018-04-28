@@ -30,16 +30,17 @@ public class BalancerLauncher{
 	private static final int PORT = 8000;
 	
 
-	public static LoadBalancer buildLoadBalancer(AmazonElasticLoadBalancing client){
-		CreateLoadBalancerRequest request = new CreateLoadBalancerRequest().withName(LBNAME).withSubnets(SUBNETS[0], SUBNETS[1]);
-	    CreateLoadBalancerResult result = client.createLoadBalancer(request);
-		return result.getLoadBalancers().get(0);
-	}
 
 	public static TargetGroup buildTargetGroup(AmazonElasticLoadBalancing client){
 		CreateTargetGroupRequest request = new CreateTargetGroupRequest().withName(TGNAME).withPort(PORT).withProtocol(PROTOCOL).withVpcId(VPCID);
 		CreateTargetGroupResult result = client.createTargetGroup(request);
 		return result.getTargetGroups().get(0);
+	}
+
+	public static LoadBalancer buildLoadBalancer(AmazonElasticLoadBalancing client){
+		CreateLoadBalancerRequest request = new CreateLoadBalancerRequest().withName(LBNAME).withSubnets(SUBNETS[0], SUBNETS[1]);
+	    CreateLoadBalancerResult result = client.createLoadBalancer(request);
+		return result.getLoadBalancers().get(0);
 	}
 
 	public static RegisterTargetsResult register(AmazonElasticLoadBalancing client, TargetGroup tg){
