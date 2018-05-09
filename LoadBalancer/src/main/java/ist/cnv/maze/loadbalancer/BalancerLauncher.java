@@ -1,4 +1,4 @@
-package ist.cnv.loadbalancer;
+package ist.cnv.maze.loadbalancer;
 
 import com.amazonaws.services.elasticloadbalancingv2.model.CreateLoadBalancerRequest;
 import com.amazonaws.services.elasticloadbalancingv2.model.CreateLoadBalancerResult;
@@ -12,11 +12,6 @@ import com.amazonaws.services.elasticloadbalancingv2.model.RegisterTargetsReques
 import com.amazonaws.services.elasticloadbalancingv2.model.RegisterTargetsResult;
 import com.amazonaws.services.elasticloadbalancingv2.model.TargetGroup;
 import com.amazonaws.services.elasticloadbalancingv2.model.LoadBalancer;
-
-
-
-import java.util.ArrayList;
-import java.util.List;
 
 
 public class BalancerLauncher{

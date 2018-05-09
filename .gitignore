@@ -3,6 +3,7 @@
 
 #idea files
 .idea
+*.iml
 
 #target
 target/

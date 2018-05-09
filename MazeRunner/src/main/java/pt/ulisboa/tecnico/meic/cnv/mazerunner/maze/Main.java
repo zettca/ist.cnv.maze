@@ -38,9 +38,6 @@ public class Main {
 	 */
 	public static void main(String[] args) throws InvalidMazeRunningStrategyException,
 			InvalidCoordinatesException, CantGenerateOutputFileException, CantReadMazeInputFileException {
-
-		System.out.println(args);
-
 		if(args.length < 8) {
 			throw new IllegalArgumentException("InsuficientArguments - The maze runners do not have enough information to solve the maze");
 		}
