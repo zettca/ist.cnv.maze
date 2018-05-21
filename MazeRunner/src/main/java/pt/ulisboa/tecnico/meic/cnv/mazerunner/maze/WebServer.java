@@ -19,7 +19,9 @@ import java.util.concurrent.Executors;
 public class WebServer {
 
     private static final short PORT = 8000;
-
+	private static final String CP = "MazeRunner/src/main/java/";
+	private static final String FOLDER = "pt/ulisboa/tecnico/meic/cnv/mazerunner/maze/";
+	
     public static void main(String[] args) throws Exception {
         HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
         server.createContext("/test", new MyHandler());
@@ -51,12 +53,12 @@ public class WebServer {
                 args.put(str[0], str[1]);
             }
 			
-			String outFile = String.format("outputs/%s_%s_%s_%s_%s_%s_%s.html", args.get("x0"), args.get("y0"),
+			String outFile = String.format(CP + FOLDER + "outputs/%s_%s_%s_%s_%s_%s_%s.html", args.get("x0"), args.get("y0"),
 										   args.get("x1"), args.get("y1"), args.get("v"), args.get("s"), args.get("m"));
 			//TODO verify keys
-            args.put("m", "pt/ulisboa/tecnico/meic/cnv/mazerunner/maze/" + args.get("m"));
+            args.put("m", CP + FOLDER + "mazes/" + args.get("m"));
 
-            String values = String.format("java pt.ulisboa.tecnico.meic.cnv.mazerunner.maze.Main %s %s %s %s %s %s %s %s",
+            String values = String.format("java -cp " + CP + " pt.ulisboa.tecnico.meic.cnv.mazerunner.maze.Main %s %s %s %s %s %s %s %s",
 										  args.get("x0"), args.get("y0"), args.get("x1"), args.get("y1"), args.get("v"), args.get("s"), args.get("m"), outFile);
 
 			System.out.println(values);
