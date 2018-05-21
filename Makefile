@@ -13,4 +13,4 @@ run_lb: lb
 	cd LoadBalancer/src/main/java && java ist.cnv.maze.loadbalancer.AutoBalancer
 
 clean:
-	rm -rf `find . -name *.class`
+	rm -rf `find MazeRunner -name *.class`
