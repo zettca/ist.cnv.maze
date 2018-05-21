@@ -8,4 +8,4 @@ run:
 	java TestStuff
 
 clean:
-	rm -f *.class output/*.class ../BIT/samples/*.class
+	rm -f *.class ../BIT/samples/*.class
