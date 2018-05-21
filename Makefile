@@ -16,7 +16,7 @@ instrument:
 run_server:
 	java -cp MazeRunner/src/main/java pt.ulisboa.tecnico.meic.cnv.mazerunner.maze.WebServer
 
-run_server_instrumented: clean build server instrument
+run_instrumented: clean build server instrument
 	java -cp MazeRunner/src/main/java pt.ulisboa.tecnico.meic.cnv.mazerunner.maze.WebServer
 
 run_lb: lb
