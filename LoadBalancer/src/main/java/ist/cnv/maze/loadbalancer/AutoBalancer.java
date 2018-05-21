@@ -4,6 +4,10 @@ import com.amazonaws.AmazonClientException;
 import com.amazonaws.auth.AWSCredentials;
 import com.amazonaws.auth.AWSStaticCredentialsProvider;
 import com.amazonaws.auth.profile.ProfileCredentialsProvider;
+import com.amazonaws.services.dynamodbv2.AmazonDynamoDB;
+import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient;
+import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClientBuilder;
+import com.amazonaws.services.dynamodbv2.model.*;
 import com.amazonaws.services.ec2.AmazonEC2;
 import com.amazonaws.services.ec2.AmazonEC2ClientBuilder;
 import com.amazonaws.services.ec2.model.*;
@@ -12,9 +16,11 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 
-import java.io.IOException;
-import java.io.OutputStream;
+import javax.management.AttributeList;
+import java.io.*;
+import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -33,7 +39,8 @@ public class AutoBalancer {
     private static int robinInstance;
     private static AmazonEC2 ec2;
     private static List<Instance> instances = new ArrayList<>();
-
+    private static AmazonDynamoDB dynamoDB;
+    private static final String TABLENAME= "cnv-metrics";
 
 
     public static AWSCredentials getCredentials() {
@@ -104,6 +111,42 @@ public class AutoBalancer {
         return i;
     }
 
+    public static Boolean ping(URL url)  {
+        HttpURLConnection connection = null;
+        try {
+            String urlParameters = "test";
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setRequestProperty("Content-Length", Integer.toString(urlParameters.getBytes().length));
+            connection.setDoOutput(true);
+
+
+            DataOutputStream wr = new DataOutputStream(connection.getOutputStream());
+            wr.writeBytes(urlParameters);
+            wr.close();
+
+            InputStream is = connection.getInputStream();
+            BufferedReader rd = new BufferedReader(new InputStreamReader(is));
+
+            StringBuilder response = new StringBuilder(); // or StringBuffer if Java version 5+
+            String line;
+
+            while ((line = rd.readLine()) != null) {
+                response.append(line);
+                response.append('\r');
+            }
+
+            rd.close();
+            return true;
+        } catch (IOException e) {
+            e.printStackTrace();
+            return false;
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
 
     public static void runAutoScaler() {
         class AutoScaler implements Runnable {
@@ -112,6 +155,22 @@ public class AutoBalancer {
             public void run() {
                 try {
                     while(true) {
+
+                        /*
+                        List<String> malfunctions = new ArrayList<>();
+                        for (Instance x : instances) {
+                            Boolean p = ping(new URL(x.getPublicDnsName()));
+                            if (!p) {
+                                malfunctions.add(x.getInstanceId());
+                                instances.remove(x);
+                            }
+                        }
+                        if (malfunctions.size() > 0){
+                            terminateInstances(malfunctions);
+                            launchInstances(malfunctions.size(), malfunctions.size());
+                        }
+                        */
+
                         if (instances.size() == 0) {
                             launchInstances(1, 4);
                         }
@@ -125,10 +184,11 @@ public class AutoBalancer {
                             terminateInstances(terminators);
                         }
 
-                        Thread.sleep(6000);
+                        Thread.sleep(600);
                     }
                 } catch (InterruptedException e) {
                     e.printStackTrace();
+
                 }
             }
         }
@@ -136,7 +196,7 @@ public class AutoBalancer {
         Thread as = new Thread(autoScaler);
         as.start();
     }
-
+    
     public static void buildLoadBalancer() throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
         server.createContext("/mzrun", new lbHandler());
@@ -171,11 +231,27 @@ public class AutoBalancer {
         }
     }
 
+    public static TableDescription getTableDescription(){
+        DescribeTableRequest request = new DescribeTableRequest().withTableName(TABLENAME);
+        return dynamoDB.describeTable(request).getTable();
+    }
+
+    public static ScanResult scanTable(String tableName, String query){
+            Map<String,Condition> scanFilter = new HashMap<>();
+            Condition c = new Condition().withComparisonOperator(ComparisonOperator.EQ.toString()).withAttributeValueList(new AttributeValue().withS(query));
+            scanFilter.put("id", c);
+            ScanRequest request = new ScanRequest(tableName).withScanFilter(scanFilter);
+            return dynamoDB.scan(request);
+    }
+
     public static void main(String[] args){
         try {
-            //Initializes instances list and ec2 client            instances = new ArrayList<>();
+            //Initializes instances list and ec2 client and dynamoDB
             ec2 = AmazonEC2ClientBuilder.standard().withRegion(REGION).withCredentials(new AWSStaticCredentialsProvider(getCredentials())).build();
+            dynamoDB = AmazonDynamoDBClientBuilder.standard().withCredentials(new AWSStaticCredentialsProvider(getCredentials())).build();
             robinInstance = 0;
+
+
 
 
             //Starts Auto Scaler
