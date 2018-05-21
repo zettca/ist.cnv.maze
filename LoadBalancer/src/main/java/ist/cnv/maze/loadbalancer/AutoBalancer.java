@@ -6,28 +6,33 @@ import com.amazonaws.auth.AWSStaticCredentialsProvider;
 import com.amazonaws.auth.profile.ProfileCredentialsProvider;
 import com.amazonaws.services.ec2.AmazonEC2;
 import com.amazonaws.services.ec2.AmazonEC2ClientBuilder;
-import com.amazonaws.services.ec2.model.Instance;
-import com.amazonaws.services.ec2.model.RunInstancesRequest;
-import com.amazonaws.services.ec2.model.RunInstancesResult;
-import com.amazonaws.services.ec2.model.TerminateInstancesRequest;
+import com.amazonaws.services.ec2.model.*;
+import com.sun.net.httpserver.Headers;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
+import com.sun.net.httpserver.HttpServer;
 
+import java.io.IOException;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class AutoBalancer {
 
-    private static final String LBNAME = "CNVLB";
-    private static final String TGNAME = "CNVTG";
+    private static final int MIN = 1;
+    private static final int MAX = 4;
     private static final String SECGROUP = "cnv-ssh+http";
     private static final String AMI = "ami-a53bb7da";
     private static final String KEY = "CNV-proj";
-    private static final String PROTOCOL = "HTTP";
     private static final String REGION = "us-east-1";
     private static final String ITYPE = "t2.micro";
-    private static final String VPCID = "vpc-928105e9";
-    private static final String[] SUBNETS = {"subnet-6b8fa536", "subnet-482cd202"};
     private static final int PORT = 8000;
-    private static List<Instance> instances;
+    private static int robinInstance;
+    private static AmazonEC2 ec2;
+    private static List<Instance> instances = new ArrayList<>();
 
 
 
@@ -47,7 +52,7 @@ public class AutoBalancer {
 
 
 
-    public static void launchInstances(AmazonEC2 ec2, int min, int max){
+    public static void launchInstances(int min, int max){
         RunInstancesRequest request = new RunInstancesRequest();
 
 
@@ -59,38 +64,65 @@ public class AutoBalancer {
                 .withSecurityGroups(SECGROUP);
 
         RunInstancesResult result =	ec2.runInstances(request);
-        instances.addAll(result.getReservation().getInstances());
+
+        List<Instance> newInstances = result.getReservation().getInstances();
+        List<String> newInstancesIds = new ArrayList<>();
+
+        for (Instance i : newInstances){
+            newInstancesIds.add(i.getInstanceId());
+        }
+
+        while(newInstancesIds.size() > 0) {
+            DescribeInstancesResult describeInstancesRequest = ec2.describeInstances();
+            List<Reservation> reservations = describeInstancesRequest.getReservations();
+            List<Instance> instanceList = new ArrayList<>();
+            for (Reservation reservation : reservations) {
+                instanceList.addAll(reservation.getInstances());
+            }
+
+            for (Instance i : instanceList) {
+                if (newInstancesIds.contains(i.getInstanceId())) {
+                    if (i.getState().getCode() == 16){
+                        instances.add(i);
+                        newInstancesIds.remove(i.getInstanceId());
+                    }
+                }
+            }
+        }
+        System.out.println("Started requested Instances");
     }
 
-    public static void terminateInstances(AmazonEC2 ec2, List<String> ids){
+    public static void terminateInstances(List<String> ids){
         TerminateInstancesRequest request = new TerminateInstancesRequest(ids);
         ec2.terminateInstances(request);
     }
 
+    public static Instance getNextRobin() {
+        Instance i;
+        i = instances.get(robinInstance);
+        robinInstance = (robinInstance + 1) % instances.size();
+        return i;
+    }
 
-    public static void runAutoScaler(AmazonEC2 ec2) {
+
+    public static void runAutoScaler() {
         class AutoScaler implements Runnable {
-            AmazonEC2 ec2;
-
-            public AutoScaler(AmazonEC2 ec2) {
-                this.ec2 = ec2;
-            }
 
             @Override
             public void run() {
                 try {
                     while(true) {
                         if (instances.size() == 0) {
-                            launchInstances(ec2, 1, 1);
+                            launchInstances(1, 4);
                         }
-                        else if (instances.size() > 1){
+                        else if (instances.size() > 4){
                             List<String> terminators = new ArrayList<>();
                             for (int i = instances.size(); i > 1; i--){
-                                Instance t = instances.get(0);
-                                instances.remove(t);
-                                terminators.add(t.getInstanceId());
+                                Instance instance = instances.get(0);
+                                instances.remove(instance);
+                                terminators.add(instance.getInstanceId());
                             }
-                            terminateInstances(ec2, terminators);
+                            terminateInstances(terminators);
                         }
 
                         Thread.sleep(6000);
@@ -100,19 +132,57 @@ public class AutoBalancer {
                 }
             }
         }
-        Runnable autoScaler = new AutoScaler(ec2);
+        Runnable autoScaler = new AutoScaler();
         Thread as = new Thread(autoScaler);
         as.start();
     }
 
+    public static void buildLoadBalancer() throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
+        server.createContext("/mzrun", new lbHandler());
+        server.setExecutor(null);
+        server.start();
+    }
+
+    private static class lbHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange t) throws IOException {
+            String response;
+
+            if (instances.size() > 0) {
+                String ip = getNextRobin().getPublicIpAddress();
+                System.out.println("Redirecting Query " + t.getRequestURI().getQuery() + " to ip: " + ip);
+                response = t.getRequestURI().getQuery();
+                Headers rHeaders = t.getResponseHeaders();
+                rHeaders.set("Location", "http://" + ip + ":" + PORT + "/mzrun.html?" + t.getRequestURI().getQuery() );
+                t.sendResponseHeaders(302, 0);
+            }
+            else {
+                System.out.println("Received Query " + t.getRequestURI().getQuery());
+                response = "Error code 503: No Available Instance";
+                t.sendResponseHeaders(503, response.length());
+            }
+            OutputStream os = t.getResponseBody();
+            os.write(response.getBytes());
+            os.close();
+
+
+            //TODO Send to WS with ip of client
+        }
+    }
+
     public static void main(String[] args){
         try {
-            //Initializes instances list and ec2 client
-            instances = new ArrayList<>();
-            AmazonEC2 ec2 = AmazonEC2ClientBuilder.standard().withRegion(REGION).withCredentials(new AWSStaticCredentialsProvider(getCredentials())).build();
+            //Initializes instances list and ec2 client            instances = new ArrayList<>();
+            ec2 = AmazonEC2ClientBuilder.standard().withRegion(REGION).withCredentials(new AWSStaticCredentialsProvider(getCredentials())).build();
+            robinInstance = 0;
 
-            //Starts AutoScaler
-            runAutoScaler(ec2);
+
+            //Starts Auto Scaler
+            runAutoScaler();
+
+            //Starts Load Balancer
+            buildLoadBalancer();
 
         } catch (Exception e) {
             e.printStackTrace();
