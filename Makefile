@@ -6,7 +6,7 @@ server:
 lb:
 	javac `find LoadBalancer/src/main/java -name *.java`
 
-run_server: server
+run_server:
 	java -cp MazeRunner/src/main/java pt.ulisboa.tecnico.meic.cnv.mazerunner.maze.WebServer
 
 run_lb: lb

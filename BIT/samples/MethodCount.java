@@ -32,8 +32,12 @@ public class MethodCount {
         try {
             File file = new File(FILENAME);
             if (!file.exists()) file.createNewFile();
+
             FileWriter writer = new FileWriter(file, true);
-            writer.write(Integer.toString(m_count) + System.lineSeparator());
+            writer.write(String.format("CALLS: %d\n", m_count));
+            writer.flush();
+            writer.close();
+
             System.out.println(String.format("WROTE %d to FILE %s", m_count, FILENAME));
         } catch (IOException e) {
             System.out.println(e.getMessage());
