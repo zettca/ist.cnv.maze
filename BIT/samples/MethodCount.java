@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.util.Enumeration;
 
 public class MethodCount {
+    private static final String FILENAME = "instrumentation_data.txt";
     private static int m_count = 0;
 
     public static void main(String argv[]) {
@@ -28,13 +29,12 @@ public class MethodCount {
     }
 
     public static synchronized void printMCount(String foo) {
-        String FILENAME = "instrumentation_data.txt";
         try {
             File file = new File(FILENAME);
             if (!file.exists()) file.createNewFile();
 
-            FileWriter writer = new FileWriter(file, true);
-            writer.write(String.format("CALLS: %d\n", m_count));
+            FileWriter writer = new FileWriter(file, false);
+            writer.write(String.format("MethodCalls: %d", m_count));
             writer.flush();
             writer.close();
 

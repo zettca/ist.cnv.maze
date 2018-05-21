@@ -1,26 +1,41 @@
 package pt.ulisboa.tecnico.meic.cnv.mazerunner.maze;
 
+import com.amazonaws.auth.profile.ProfileCredentialsProvider;
+import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient;
+import com.amazonaws.services.dynamodbv2.document.DynamoDB;
+import com.amazonaws.services.dynamodbv2.document.Item;
+import com.amazonaws.services.dynamodbv2.document.Table;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
 
 public class WebServer {
 
+    private static final String FILENAME = "instrumentation_data.txt";
+    private static final String DYNAMO_TABLE_NAME = "cnv-metrics";
+
     private static final short PORT = 8000;
     private static final String CP = "MazeRunner/src/main/java/";
     private static final String FOLDER = "pt/ulisboa/tecnico/meic/cnv/mazerunner/maze/";
 
+    private static DynamoDB dynamoDB;
+
     public static void main(String[] args) throws Exception {
+        dynamoDB = new DynamoDB(new AmazonDynamoDBClient(new ProfileCredentialsProvider()));
+
         HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
         server.createContext("/test", new MyHandler());
         server.createContext("/mzrun.html", new MazeHandler());
@@ -51,9 +66,11 @@ public class WebServer {
                 args.put(str[0], str[1]);
             }
 
-            String outFile = String.format(
-                    CP + FOLDER + "outputs/%s_%s_%s_%s_%s_%s_%s.html",
-                    args.get("x0"), args.get("y0"), args.get("x1"), args.get("y1"), args.get("v"), args.get("s"), args.get("m"));
+            String id = String.format("%s_%s_%s_%s_%s_%s_%s",
+                    args.get("x0"), args.get("y0"), args.get("x1"), args.get("y1"), args.get("v"), args.get("s"),
+                    args.get("m"));
+
+            String outFile = String.format("%s%soutputs/%s.html", CP, FOLDER, id);
             //TODO verify keys
             args.put("m", CP + FOLDER + "mazes/" + args.get("m"));
 
@@ -81,6 +98,20 @@ public class WebServer {
             OutputStream os = t.getResponseBody();
             os.write(data);
             os.close();
+
+            System.out.println("Loading metrics...");
+            int value = -1;
+            File file = new File(FILENAME);
+            if (file.exists()) {
+                List<String> lines = Files.readAllLines(Paths.get(FILENAME), Charset.defaultCharset());
+                String line0 = lines.get(0);
+                String valString = line0.split(": ")[1];
+                value = Integer.parseInt(valString);
+            }
+
+            System.out.println("Writing metrics to Dynamo...");
+            Table table = dynamoDB.getTable(DYNAMO_TABLE_NAME);
+            table.putItem(new Item().withPrimaryKey("id", id).withInt("value", value));
         }
     }
 }
