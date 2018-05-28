@@ -5,7 +5,6 @@ import com.amazonaws.auth.AWSCredentials;
 import com.amazonaws.auth.AWSStaticCredentialsProvider;
 import com.amazonaws.auth.profile.ProfileCredentialsProvider;
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDB;
-import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient;
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClientBuilder;
 import com.amazonaws.services.dynamodbv2.model.*;
 import com.amazonaws.services.ec2.AmazonEC2;
@@ -16,20 +15,18 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 
-import javax.management.AttributeList;
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.URL;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 public class AutoBalancer {
 
-    private static final int MIN = 1;
-    private static final int MAX = 4;
+    private static final int MIN_INS = 1;
+    private static final int MAX_INS = 1;
+    private static final String PINGPATH = "/test";
+    private static final String MAZEPATH = "/mzrun.html";
     private static final String SECGROUP = "cnv-ssh+http";
     private static final String AMI = "ami-a53bb7da";
     private static final String KEY = "CNV-proj";
@@ -41,9 +38,11 @@ public class AutoBalancer {
     private static List<Instance> instances = new ArrayList<>();
     private static AmazonDynamoDB dynamoDB;
     private static final String TABLENAME= "cnv-metrics";
+    private static final int INITTIME = 300000;
+    private static final int ASWAIT = 60000;
 
 
-    public static AWSCredentials getCredentials() {
+    private static AWSCredentials getCredentials() {
         AWSCredentials credentials;
         try{
             credentials = new ProfileCredentialsProvider().getCredentials();
@@ -59,7 +58,7 @@ public class AutoBalancer {
 
 
 
-    public static void launchInstances(int min, int max){
+    private static void launchInstances(int min, int max){
         RunInstancesRequest request = new RunInstancesRequest();
 
 
@@ -96,34 +95,43 @@ public class AutoBalancer {
                 }
             }
         }
-        System.out.println("Started requested Instances");
+        System.out.println("Started " + max + " requested Instances");
     }
 
-    public static void terminateInstances(List<String> ids){
+    private static void terminateInstances(List<String> ids){
         TerminateInstancesRequest request = new TerminateInstancesRequest(ids);
         ec2.terminateInstances(request);
     }
 
-    public static Instance getNextRobin() {
+    private static Instance getNextRobin() {
         Instance i;
-        i = instances.get(robinInstance);
-        robinInstance = (robinInstance + 1) % instances.size();
+        int x = 0;
+        if (instances.size() == 0){
+            System.out.println("No Available Instances");
+            return null;
+        }
+        for (i = instances.get(robinInstance); !isOk(i); robinInstance = (robinInstance + 1) % instances.size()){
+            if (x == instances.size()){
+                System.out.println("No initialized instance");
+                return null;
+            }
+            x++;
+        }
         return i;
     }
 
-    public static Boolean ping(URL url)  {
+    private static Boolean isOk(Instance i){
+        return getInstanceStatus(i).getInstanceStatus().getStatus().equals("ok");
+    }
+
+    private static Boolean ping(URL url)  {
         HttpURLConnection connection = null;
         try {
-            String urlParameters = "test";
             connection = (HttpURLConnection) url.openConnection();
             connection.setRequestMethod("GET");
-            connection.setRequestProperty("Content-Length", Integer.toString(urlParameters.getBytes().length));
+            connection.setRequestProperty("Content-Length", Integer.toString(0));
             connection.setDoOutput(true);
 
-
-            DataOutputStream wr = new DataOutputStream(connection.getOutputStream());
-            wr.writeBytes(urlParameters);
-            wr.close();
 
             InputStream is = connection.getInputStream();
             BufferedReader rd = new BufferedReader(new InputStreamReader(is));
@@ -148,45 +156,54 @@ public class AutoBalancer {
         }
     }
 
-    public static void runAutoScaler() {
+    private static void runAutoScaler() {
         class AutoScaler implements Runnable {
 
             @Override
             public void run() {
                 try {
-                    while(true) {
-
-                        /*
-                        List<String> malfunctions = new ArrayList<>();
-                        for (Instance x : instances) {
-                            Boolean p = ping(new URL(x.getPublicDnsName()));
-                            if (!p) {
-                                malfunctions.add(x.getInstanceId());
-                                instances.remove(x);
-                            }
-                        }
-                        if (malfunctions.size() > 0){
-                            terminateInstances(malfunctions);
-                            launchInstances(malfunctions.size(), malfunctions.size());
-                        }
-                        */
-
-                        if (instances.size() == 0) {
-                            launchInstances(1, 4);
-                        }
-                        else if (instances.size() > 4){
-                            List<String> terminators = new ArrayList<>();
-                            for (int i = instances.size(); i > 1; i--){
-                                Instance instance = instances.get(0);
-                                instances.remove(instance);
-                                terminators.add(instance.getInstanceId());
-                            }
-                            terminateInstances(terminators);
-                        }
-
-                        Thread.sleep(600);
+                    if (instances.size() == 0) {
+                        launchInstances(MIN_INS, MAX_INS);
                     }
-                } catch (InterruptedException e) {
+                    do {
+                        List<String> malfunctions = new ArrayList<>();
+                        if (instances.size() > 0) {
+                            for (Instance x : instances) {
+                                InstanceStatus status = getInstanceStatus(x);
+                                if (status.getInstanceStatus().getStatus().equals("initializing")) {
+                                    System.out.println("Instance still Initializing");
+                                    long compareTime = x.getLaunchTime().getTime() + INITTIME;
+                                    Date date = new Date();
+                                    if (date.getTime() > compareTime) {
+                                        System.out.println("Instance timed out");
+                                        malfunctions.add(x.getInstanceId());
+                                    }
+                                } else {
+                                    URL url = new URL("http://" + x.getPublicDnsName() + ":" + PORT + PINGPATH);
+                                    System.out.println("http://" + x.getPublicDnsName() + ":" + PORT + PINGPATH);
+                                    Boolean p = ping(url);
+                                    if (!p) {
+                                        System.out.println("Instance " + x.getInstanceId() + " is malfunctioning :(");
+                                        malfunctions.add(x.getInstanceId());
+                                    }
+                                }
+                            }
+                            if (malfunctions.size() > 0) {
+                                List<Instance> instanceList = new ArrayList<>();
+                                for (Instance i : instances) {
+                                    if (!malfunctions.contains(i.getInstanceId())) {
+                                        instanceList.add(i);
+                                    }
+                                }
+                                instances = instanceList;
+                                terminateInstances(malfunctions);
+                                launchInstances(malfunctions.size(), malfunctions.size());
+                            }
+                            Thread.sleep(ASWAIT);
+                        }
+                    } while (true);
+
+                } catch (Exception e) {
                     e.printStackTrace();
 
                 }
@@ -196,10 +213,16 @@ public class AutoBalancer {
         Thread as = new Thread(autoScaler);
         as.start();
     }
-    
-    public static void buildLoadBalancer() throws IOException {
+
+    private static InstanceStatus getInstanceStatus(Instance i) {
+        DescribeInstanceStatusRequest request = new DescribeInstanceStatusRequest().withInstanceIds(i.getInstanceId());
+        DescribeInstanceStatusResult result = ec2.describeInstanceStatus(request);
+        return result.getInstanceStatuses().get(0);
+    }
+
+    private static void buildLoadBalancer() throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
-        server.createContext("/mzrun", new lbHandler());
+        server.createContext(MAZEPATH, new lbHandler());
         server.setExecutor(null);
         server.start();
     }
@@ -208,9 +231,10 @@ public class AutoBalancer {
         @Override
         public void handle(HttpExchange t) throws IOException {
             String response;
+            Instance robin = getNextRobin();
 
-            if (instances.size() > 0) {
-                String ip = getNextRobin().getPublicIpAddress();
+            if (robin != null) {
+                String ip = robin.getPublicIpAddress();
                 System.out.println("Redirecting Query " + t.getRequestURI().getQuery() + " to ip: " + ip);
                 response = t.getRequestURI().getQuery();
                 Headers rHeaders = t.getResponseHeaders();
@@ -248,7 +272,7 @@ public class AutoBalancer {
         try {
             //Initializes instances list and ec2 client and dynamoDB
             ec2 = AmazonEC2ClientBuilder.standard().withRegion(REGION).withCredentials(new AWSStaticCredentialsProvider(getCredentials())).build();
-            dynamoDB = AmazonDynamoDBClientBuilder.standard().withCredentials(new AWSStaticCredentialsProvider(getCredentials())).build();
+            dynamoDB = AmazonDynamoDBClientBuilder.standard().withCredentials(new AWSStaticCredentialsProvider(getCredentials())).withRegion(REGION).build();
             robinInstance = 0;
 
 
@@ -259,6 +283,22 @@ public class AutoBalancer {
 
             //Starts Load Balancer
             buildLoadBalancer();
+
+            Runtime.getRuntime().addShutdownHook(new Thread() {
+                @Override
+                public void run() {
+                    super.run();
+                    if (instances.size() > 0) {
+                        List<String> ids = new ArrayList<>();
+                        for (Instance i : instances) {
+                            ids.add(i.getInstanceId());
+                        }
+                        terminateInstances(ids);
+                        System.out.println("Instances Terminated");
+                    }
+                }
+
+            });
 
         } catch (Exception e) {
             e.printStackTrace();
