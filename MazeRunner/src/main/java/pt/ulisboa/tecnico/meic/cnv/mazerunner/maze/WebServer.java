@@ -70,19 +70,21 @@ public class WebServer {
                     args.get("x0"), args.get("y0"), args.get("x1"), args.get("y1"), args.get("v"), args.get("s"),
                     args.get("m"));
 
-            String outFile = String.format("%s%soutputs/%s.html", CP, FOLDER, id);
+            String outFile = String.format("%soutputs/%s.html", FOLDER, id);
             //TODO verify keys
-            args.put("m", CP + FOLDER + "mazes/" + args.get("m"));
+            args.put("m", FOLDER + "mazes/" + args.get("m"));
 
             String values = String.format(
-                    "java -cp " + CP + " pt.ulisboa.tecnico.meic.cnv.mazerunner.maze.Main %s %s %s %s %s %s %s %s",
+                    "java pt.ulisboa.tecnico.meic.cnv.mazerunner.maze.Main %s %s %s %s %s %s %s %s",
                     args.get("x0"), args.get("y0"), args.get("x1"), args.get("y1"), args.get("v"), args.get("s"), args.get("m"), outFile);
+
+            System.out.println("exec.dir = " + System.getProperty("user.dir"));
 
             System.out.println(values);
             try {
                 Process pr = Runtime.getRuntime().exec(values);
                 int exitCode = pr.waitFor();
-                if (exitCode != 0) {
+                if (exitCode < 0) {
                     System.out.println("Command exited with " + exitCode);
                 }
             } catch (Exception e) {
@@ -90,6 +92,7 @@ public class WebServer {
                 e.printStackTrace();
             }
 
+            System.out.println("Output: " + outFile);
             Path path = Paths.get(outFile);
             byte[] data = Files.readAllBytes(path);
 

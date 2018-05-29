@@ -14,10 +14,9 @@ instrument:
 	cd MazeRunner/src/main/java/pt/ulisboa/tecnico/meic/cnv/mazerunner/maze/ && java MethodCount RobotController.class
 
 run_server:
-	java -cp MazeRunner/src/main/java pt.ulisboa.tecnico.meic.cnv.mazerunner.maze.WebServer
+	cd MazeRunner/src/main/java/ && java pt.ulisboa.tecnico.meic.cnv.mazerunner.maze.WebServer
 
-run_instrumented: clean build server instrument
-	java -cp MazeRunner/src/main/java pt.ulisboa.tecnico.meic.cnv.mazerunner.maze.WebServer
+run_instrumented: clean build server instrument run_server
 
 run_lb: lb
 	cd LoadBalancer/src/main/java && java ist.cnv.maze.loadbalancer.AutoBalancer
